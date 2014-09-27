@@ -1,0 +1,7 @@
+queryLength     30
+disp    0
+searchDepth     20
+qualThresh      39
+ordered 0
+checkTime       5
+minContigLength 500
