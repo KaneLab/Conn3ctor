@@ -30,7 +30,7 @@ numHeaders=`echo ${#headerArray[@]}`
 for ((i=0; i<$numHeaders; i++))
 do
         cHeader=${headerArray[$i]}
-        grep -A1 $cHeader ${file}_unwrapped.fasta > split_scaf/${headerArray[$i]} #cast header list as array
+        grep -A1 ${cHeader}$ ${file}_unwrapped.fasta > split_scaf/${headerArray[$i]} #cast header list as array
 done
 
 rm ${file}_unwrapped.fasta
