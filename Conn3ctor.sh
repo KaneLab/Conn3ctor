@@ -125,14 +125,14 @@ fi
 
 
 
-cat scafList.co
+#cat scafList.co
 scafString=`cat scafList.co`
 scafListArray=($scafString)
 scafListLength=${#scafListArray[@]}
 firstLoop=1
 universalAddCount=0
 
-cat scafList.co
+#cat scafList.co
 scafString=`ls split_scaf/`
 scafListArrayL=($scafString)
 scafListLengthL=${#scafListArrayL[@]}
@@ -146,10 +146,6 @@ universalAddCount=0
 for ((h=0; h<$scafListLengthL; h++));do
         header1=${scafListArrayL[$h]}
         header1Size=`ls -So split_scaf/$header1 | awk '{print $4}'`
-        #header1SizeT2=($header1SizeT)
-        #echo "header1size2 is $header1SizeT2"
-        #header1Size=${header1SizeT2[0]}
-        #echo "header size is ${header1SizeT2[0]}"
         if [ $header1Size -ge $minContigLength ]; then
                 tempString=`grep -v '>' ./split_scaf/$header1 | sed ':a;N;$!ba;s/\r//g'| sed ':a;N;$!ba;s/\n//g' | sed 's/ //g'`
                 rm ./split_scaf/$header1
@@ -165,19 +161,20 @@ done
 for ((i=0; i<$scafListLength; i++));do
 
 checkCounter=$checkTime
+globalAddCount=0
+oldGlobalAddCount=0
+stuckCounter=0
+>readIDs.co
+>addCount.co
 
 #Format the input contig or scaffold to remove spaces, and carriage returns, then return it back into fasta format by adding back in the header.
         header1=${scafListArray[$i]}
         grep -v '>' ./split_scaf/$header1 | sed ':a;N;$!ba;s/\n//g' | sed 's/ //g' > workingContig.co
-        echo "Moved $header1 to quarantine"
+        echo "Moved $header1 to quarantine"; echo "Moved $header1 to quarantine" >> log
         mv split_scaf/$header1 quarantine/
 #Get the working contig, its length.
         workingContig=`grep -v '>' workingContig.co`
         originalContigLength=`echo $((${#workingContig} - $disp))`
-
-
-globalAddCount=0
-
 
 while [ $checkCounter -gt 0 ];do
         if [ $firstLoop -eq 0 ];then
@@ -187,8 +184,8 @@ while [ $checkCounter -gt 0 ];do
         contigLength=$(( $preContigLength - $disp ))
         fi
 
-
-######################Start addSequence preparation.  This includes getQuery, getAlignment, checkNumConcensus, formatConcensus, stringToArray, and truncateWorkingContig##############################
+addCount=0
+######################Start addSequence preparation.  This includes getQuery, getAlignment, checkNumConcensus, formatConcensus, stringToArray, and truncateWorkingContig###########################
 
 
 #getQuery:  This is based on values of -k (queryLength) and -n (disp).
@@ -201,6 +198,9 @@ while [ $checkCounter -gt 0 ];do
 
 #getAlignment:  grep the query in the short-reads and save them.  Note that $searchDepth is the number of matching lines that grep takes FROM EACH FILE.  So max number of reads = $searchDepth*(number of files in directory).
         grep -m $searchDepth -h $query ./reads/*fastq > reads.co
+	grep -m $searchDepth -B1 --no-filename $query reads/*.fastq | grep -v $query | cut -d " " -f1 >> readIDs.co
+	currReadID=`tail -n 1 readIDs.co`
+	echo "TESTING:  Current read ID is $currReadID"
         numReads=`wc -l reads.co | awk '{ print $1 }'`
         if [ $numReads -eq 0 ];then             #if your grep query came up empty, move on to next contig
                 echo "No reads matched your grep query!  Dammit, Jim!  I'm a conn3ctor, not a miracle worker!"
@@ -212,7 +212,7 @@ while [ $checkCounter -gt 0 ];do
                 break
         fi
         cat reads.co | awk '{ print ">" FNR "\n" $0 }' > reads_formatted.co             #format output to look like fasta
-        cap3 reads_formatted.co                                                 #perform cap3 Alignment on reads
+        cap3 reads_formatted.co > /dev/null                                                #perform cap3 Alignment on reads
 
 
 #checkNumConcensus:  If cap3 finds more than one consensus, we need an adult.
@@ -255,25 +255,25 @@ while [ $checkCounter -gt 0 ];do
                 contigTotalLines=($contigTotalLinestring)
                 start=${lineNums[$(($maxPos))]}
                 contigStart=${contigLineNums[$(($maxPos))]}
-                if [ $(($maxPos+1)) -eq $arrayLength ];then
+		maxPosPlus=$(( $maxPos + 1 ))
+                if [ $maxPosPlus -eq $arrayLength ];then
                         end=$totalLines
                         contigEnd=$contigTotalLines
                 else
-                        maxPosPlus=$(($maxPos + 1))
-                        end=$((${lineNums[$maxPosPlus]} - 1))
+                        end=$(( ${lineNums[$maxPosPlus]} - 1 ))
                         preContigEnd=${contigLineNums[$maxPosPlus]}
                         contigEnd=$(($preContigEnd - 1))
                 fi
-                cat reads_formatted.co.cap.contigs.qual | sed -n "$start,${end}p" > quals.co    #Get quals from correct consensus
+                cat reads_formatted.co.cap.contigs.qual | sed -n "$start,${end}p" > correct_quals.co    #Get quals from correct consensus
                 cat reads_formatted.co.cap.contigs | sed -n "$contigStart,${contigEnd}p" > correct_consensus.co         #Get correct consensus
                 grep -v '>' correct_consensus.co | sed ':a;N;$!ba;s/\n//g'> reads_consensus.co
-                cat quals.co    #display correct consensus if several are found
+		grep -v '>' correct_quals.co > quals.co
+                #cat quals.co    #display correct consensus if several are found
 
         #FAILED FOLDER:  If no consensus found in cap3 alignment
         elif [ $numConsensus -eq 0 ]; then
                 echo "NO CONSENSUS FOUND.  UNABLE TO PROCEED.  PROTOCOL 6.022b CALLS FOR TERMINATION.  HAVE A GOOD DAY."
                 echo "$header1:     Moved to /failed for failure to make consensus with query $query." >> log
-                #echo "Original contig is $workingContig" >> failed/$header1
                 echo '>'$header1 >> failed/$header1
                 echo $newSeq >> failed/$header1
                 rm ./quarantine/$header1
@@ -284,7 +284,7 @@ while [ $checkCounter -gt 0 ];do
                 maxPos=0
                 grep -v '>' reads_formatted.co.cap.contigs.qual > quals.co      #Only one consensus to get quals from
                 grep -v '>' reads_formatted.co.cap.contigs | sed ':a;N;$!ba;s/\n//g'> reads_consensus.co        #Only one consensus
-                cat quals.co    #display consensus even if only one is found
+                #cat quals.co    #display consensus even if only one is found
         fi
 
 
@@ -308,12 +308,9 @@ while [ $checkCounter -gt 0 ];do
                 if [ `ls failed/ | wc -l` -gt 1 ];then
                         rm failed/empty
                 fi
-                #echo "The query is $query"
                 echo "Multiple matches to query in consensus!  Abort mission!"
                 echo "$header1:     Moved to ./failed/ for having more than one match to query $query in consensus." >> log
-                #echo "Segmentation faulted with query:   $query" > failed/$header1
                 echo '>'$header1 >> failed/$header1
-                #echo "Original contig is $workingContig" >> failed/$header1
                 echo $newSeq >> failed/$header1
                 rm ./quarantine/$header1
                 firstLoop=1
@@ -321,15 +318,14 @@ while [ $checkCounter -gt 0 ];do
                 break
         fi
         pos=$(($queryPos + $queryLength))
-        addCount=0
-
 
 #truncateWorkingContig:  Truncate workingContig to only include everything up to the end of the query.  Get rid of sequence in the $disp displacement.
         newSeq=`echo ${workingContig:0:$contigLength}`
-
-heterozygote="false"
+	heterozygote="false"
 #'addSequence' onto $newSeq
-        for ((j=$pos; j<=$consensusLength; j++));do
+        for ((j=$pos; j<$consensusLength; j++));do
+		oldGlobalAddCount=$globalAddCount
+		#echo "J is $j, conLength is $consensusLength, qual at j+1 is ${quals[$(( $j + 1 ))]}, and qualthresh is $qualThresh"
                 if [ ${quals[$j]} -ge $qualThresh ];then        #add nucleotides until quality threshold is no longer met
                         newSeq+=${consensus[$pos]}
                         pos=$(( $pos + 1 ))
@@ -341,12 +337,12 @@ heterozygote="false"
                         heterozygote="true"
                 else
                         checkCounter=$(( $checkCounter - 1 ))           #decrement checkCounter each addSequence loop
-                        #EXTENDED FOLDER:  Add contig and any new sequence into ./extended/ if no new sequence can be added and no matches have been found.
-                        if [ $addCount -eq 0 ];then
-                                echo "The add count for this addSequence run is $addCount.  Nothing else I can do, Dave.  Adding on new sequence and moving on to next contig."
-                                echo "$header1:     Added $(( $contigLength - $originalContigLength )) before stalling and heterozygote=$heterozygote."  >> log
-                                echo '>'$header1 > extended/$header1
-                                echo $newSeq >> extended/$header1
+			#EXTENDED FOLDER:  Add contig and any new sequence into ./extended/ if no new sequence can be added and no matches have been found.
+			if [ $addCount -eq 0 ];then
+				echo "The add count for this addSequence run is $addCount.  Nothing else I can do, Dave.  Adding on new sequence and moving on to next contig."
+				echo "$header1:     Added $(( $contigLength - $originalContigLength )) before stalling and heterozygote=$heterozygote."  >> log
+				echo '>'$header1 > extended/$header1
+				echo $newSeq >> extended/$header1
                                 #echo "Added $(( $contigLength - $originalContigLength )) nucleotides to $header1." >> ./extended/$header1
                                 rm ./quarantine/$header1
                                 rm *.co
@@ -355,7 +351,8 @@ heterozygote="false"
                                 #universalAddCount= $(( $universalAddCount + $(( $(( ${#newSeq} - $originalContigLength )) - $disp )) ))
                                 break
                         fi
-                        echo "Add count is $addCount and check counter is $checkCounter"
+			echo "Add count is $addCount and check counter is $checkCounter"
+			echo $addCount >> addCount.co
                         workingContig=$newSeq
                         if [ $checkCounter -eq 0 ];then         #check every 't' addSeq iterations for conn3ctions
                                 echo '>'$header1 > temp_seq.co
@@ -370,6 +367,15 @@ heterozygote="false"
                                 matchPath+=(`grep -l  $matchQuery ./temp_connected/* ./split_scaf/* ./extended/* ./failed/*`)   #find the file path to the matches
                                 matchPathRC+=(`grep -l  $matchQueryRC ./temp_connected/* ./split_scaf/* ./extended/* ./failed/*`)
                                 biggestMatch=0
+
+###########TESTING
+				if [ `grep -c ${currReadID}\$ readIDs.co` -ge 2 ];then
+					numIDMatches=`grep -c ${currReadID}\$ readIDs.co | cut -f 1`
+					echo "Loop detected.  Found current read $currReadID $numIDMatches times.  Aborting mission!"
+					break
+				fi
+
+###########TESTING
                                 if [ $(( $numMatches + $numMatchesRC )) -gt 0 ];then
                                         for ((l=0; l<$numMatches; l++));do              #Select the biggest matching contig
                                                 matchSize+=(`wc -c ${matchPath[$l]} | awk '{print $1}'`)
@@ -438,9 +444,18 @@ heterozygote="false"
                 break
                 fi
         done
-contigLength=`echo ${#newSeq}`
-echo "The global add count is $(( $contigLength - $originalContigLength )), for a total of $contigLength nucleotides."
-echo "This is contig $(($i + 1)) out of $scafListLength."
-done
+	contigLength=`echo ${#newSeq}`
+	globalAddCount=$(( $contigLength - $originalContigLength ))
+	echo "GlobalAddCount is $globalAddCount and old one is $oldGlobalAddCount"
+	if [ $globalAddCount -eq $oldGlobalAddCount ]; then
+		stuckCounter=$(( $stuckCounter + 1 ))
+		echo "stuckCounter is at $stuckCounter out of 5."
+		if [ $stuckCounter -eq 5 ];then
+			break
+		fi
+	fi
+	echo "The global add count is $globalAddCount, for a total of $contigLength nucleotides."
+	echo "This is contig $(($i + 1)) out of $scafListLength."
+	done
 done
 rm connected/empty; rm extended/empty; rm failed/empty; rm split_scaf/empty; rm temp_connected/empty
